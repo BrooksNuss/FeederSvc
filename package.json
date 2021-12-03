@@ -4,7 +4,10 @@
   "description": "SQS based listener service for feeder on rpi",
   "main": "dist",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prebuild": "npx eslint pi",
+    "build": "tsc",
+    "prestart": "npm run build",
+    "start": "node ./dist/app"
   },
   "repository": {
     "type": "git",
@@ -18,7 +21,13 @@
   "homepage": "https://github.com/BrooksNuss/FeederSvc#readme",
   "devDependencies": {
     "@types/node": "^16.11.11",
-    "eslint": "^8.3.0",
+    "@typescript-eslint/eslint-plugin": "^5.5.0",
+    "@typescript-eslint/parser": "^5.5.0",
+    "eslint": "^7.32.0",
+    "eslint-config-standard": "^16.0.3",
+    "eslint-plugin-import": "^2.25.3",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-promise": "^5.2.0",
     "typescript": "^4.5.2"
   },
   "dependencies": {
