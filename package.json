@@ -4,10 +4,10 @@
   "description": "SQS based listener service for feeder on rpi",
   "main": "dist",
   "scripts": {
-    "prebuild": "npx eslint pi",
+    "prebuild": "npx eslint src",
     "build": "tsc",
     "prestart": "npm run build",
-    "start": "node ./dist/app"
+    "start": "node ./dist/pi/app"
   },
   "repository": {
     "type": "git",
