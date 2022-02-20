@@ -2,6 +2,7 @@ import {Consumer} from 'sqs-consumer';
 import AWS from 'aws-sdk';
 import { Agent } from 'https';
 
+console.log('Starting pi feeder server.');
 const credentials = new AWS.SharedIniFileCredentials({profile: 'pi-sqs-consumer'});
 const region = 'us-east-1';
 const queueName = 'FeederQueue';
@@ -23,12 +24,13 @@ const getQueueUrl = async () => {
 	const queueUrl = queueList?.find(queue => queue.includes(queueName));
 	
 	if (!queueUrl) {
-		console.error("Specified queue does not exist");
+		console.error('Specified queue does not exist');
 		return;
 	}
 
+	console.log('SQS queue URL found: ' + queueUrl);
 	return queueUrl;
-}
+};
 
 (async () => {
 	const queueUrl = await getQueueUrl();
@@ -51,4 +53,5 @@ const getQueueUrl = async () => {
 	});
 
 	app.start();
+	console.log('Server started.');
 })();

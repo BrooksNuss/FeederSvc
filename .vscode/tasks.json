@@ -16,6 +16,13 @@
             "problemMatcher": [],
             "label": "npm: build-pi",
             "detail": "tsc --project pi/tsconfig.json"
+        },
+        {
+            "type": "npm",
+            "script": "start-pi",
+            "problemMatcher": [],
+            "label": "npm: start-pi",
+            "detail": "node ./dist/pi/app"
         }
     ]
 }
