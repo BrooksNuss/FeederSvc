@@ -14,6 +14,7 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 	let statusCode = 200;
 	const headers = {
 		'Content-Type': 'application/json',
+		'Access-Control-Allow-Origin' : '*'
 	};
 	
 	try {
