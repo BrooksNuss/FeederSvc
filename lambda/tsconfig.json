@@ -1,0 +1,10 @@
+{
+	"compilerOptions": {
+		"outDir": "../dist/lambda",
+        "rootDir": "./"
+	},
+	"extends": "../tsconfig.json",
+	"include": [
+		"./"
+	]
+}

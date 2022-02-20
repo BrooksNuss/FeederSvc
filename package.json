@@ -7,7 +7,9 @@
     "prebuild": "npx eslint src",
     "build": "tsc",
     "prestart": "npm run build",
-    "start": "node ./dist/pi/app"
+    "start": "node ./dist/pi/app",
+    "build-lambda": "tsc --project lambda/tsconfig.json",
+    "build-pi": "tsc --project pi/tsconfig.json"
   },
   "repository": {
     "type": "git",

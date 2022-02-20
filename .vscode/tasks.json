@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+        {
+            "type": "npm",
+            "script": "build-lambda",
+            "group": "build",
+            "problemMatcher": [],
+            "label": "npm: build-lambda",
+            "detail": "tsc --project lambda/tsconfig.json"
+        },
+        {
+            "type": "npm",
+            "script": "build-pi",
+            "group": "build",
+            "problemMatcher": [],
+            "label": "npm: build-pi",
+            "detail": "tsc --project pi/tsconfig.json"
+        }
+    ]
+}

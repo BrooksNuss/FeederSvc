@@ -2,7 +2,7 @@ import AWS from 'aws-sdk';
 import { APIGatewayProxyHandler } from 'aws-lambda';
 import { ScanInput } from 'aws-sdk/clients/dynamodb';
 import { SendMessageRequest } from 'aws-sdk/clients/sqs';
-import { FeederApiResources, FeederSqsMessage } from '../models/FeederSqsMessage';
+import { FeederApiResources, FeederSqsMessage } from './models/FeederSqsMessage';
 const sqs = new AWS.SQS;
 const dynamo = new AWS.DynamoDB.DocumentClient;
 const feederQueueUrl = process.env.FEEDER_QUEUE_URL;
@@ -19,20 +19,20 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 	try {
 		const id = event.pathParameters?.id || '';
 		switch (event.resource as FeederApiResources) {
-			case '/activate/{id}':
-				body = await postSqsMessage({id, type: 'activate'});
-				break;
-			case '/list-info':
-				body = await getFeederList();
-				break;
-			case '/skip/{id}':
-				body = await postSqsMessage({id, type: 'skip'});
-				break;
-			case '/toggle-enabled/{id}':
-				body = await postSqsMessage({id, type: 'toggle-enabled'});
-				break;
+		case '/activate/{id}':
+			body = await postSqsMessage({id, type: 'activate'});
+			break;
+		case '/list-info':
+			body = await getFeederList();
+			break;
+		case '/skip/{id}':
+			body = await postSqsMessage({id, type: 'skip'});
+			break;
+		case '/toggle-enabled/{id}':
+			body = await postSqsMessage({id, type: 'toggle-enabled'});
+			break;
 			
-			default:
+		default:
 		}
 	} catch (err: any) {
 		console.error(err);
