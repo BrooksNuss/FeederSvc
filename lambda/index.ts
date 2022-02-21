@@ -32,7 +32,14 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 			if (feeder.status === 'OFFLINE') {
 				throw `Feeder {${id}} is offline`;
 			} else {
-				body = postSqsMessage({id, type: 'activate'});
+				try {
+					await postSqsMessage({id, type: 'activate'});
+					// Make db update here. await it and return the new db item instead of just success
+					body = 'Success';
+				} catch(e) {
+					console.error(e);
+					body = 'Error posting SQS message: ' + e;
+				}
 			}
 			break;
 		case '/list-info':
@@ -44,12 +51,24 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 			if (feeder.status === 'OFFLINE') {
 				throw `Feeder {${id}} is offline`;
 			} else {
-				body = postSqsMessage({id, type: 'skip'});
+				try {
+					await postSqsMessage({id, type: 'skip'});
+					body = 'Success';
+				} catch(e) {
+					console.error(e);
+					body = 'Error posting SQS message: ' + e;
+				}
 			}
 			break;
 		case '/toggle-enabled/{id}':
 			console.log('Received toggle message for feeder {%s}', id);
-			body = postSqsMessage({id, type: 'toggle-enabled'});
+			try {
+				await postSqsMessage({id, type: 'toggle-enabled'});
+				body = 'Success';
+			} catch(e) {
+				console.error(e);
+				body = 'Error posting SQS message: ' + e;
+			}
 			break;
 		}
 	} catch (err: any) {
@@ -77,19 +96,19 @@ async function getFeederList() {
 
 function getFeeder(id: string) {
 	console.log('Fetching feeder by id: ' + id);
-	const params: GetItemInput = {
+	// key type in docs is different from what the sdk expects. type should be GetItemInput
+	const params = {
 		TableName: 'feeders',
-		Key: {id: {S: id}}
+		Key: {id}
 	};
 	return dynamo.get(params).promise();
 }
 
-function postSqsMessage(body: FeederSqsMessage) {
+async function postSqsMessage(body: FeederSqsMessage) {
 	console.log('Posting message to SQS');
 	const params: SendMessageRequest = {
 		QueueUrl: feederQueueUrl || '',
 		MessageBody: JSON.stringify(body)
 	};
-	sqs.sendMessage(params);
-	return 'Success';
+	return sqs.sendMessage(params).promise();
 }

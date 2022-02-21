@@ -1,6 +1,6 @@
 {
 	"compilerOptions": {
-		"outDir": "../dist/pi",
+		"outDir": "../dist",
         "rootDir": "../",
 		"resolveJsonModule": true
 	},

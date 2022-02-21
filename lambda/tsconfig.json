@@ -1,6 +1,6 @@
 {
 	"compilerOptions": {
-		"outDir": "../dist/lambda",
+		"outDir": "../dist",
         "rootDir": "../"
 	},
 	"extends": "../tsconfig.json",
