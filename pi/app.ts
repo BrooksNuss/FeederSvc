@@ -1,6 +1,7 @@
 import {Consumer} from 'sqs-consumer';
 import AWS from 'aws-sdk';
 import { Agent } from 'https';
+import { Gpio } from 'pigpio';
 
 console.log('Starting pi feeder server.');
 const credentials = new AWS.SharedIniFileCredentials({profile: 'pi-sqs-consumer'});
@@ -55,3 +56,19 @@ const getQueueUrl = async () => {
 	app.start();
 	console.log('Server started.');
 })();
+
+async function activateMotor(pin: number) {
+	const motor = new Gpio(10, {mode: Gpio.OUTPUT});
+	// rotate 2s, reverse .5s (helps prevent getting stuck), rotate 2s again
+	motor.servoWrite(2500);
+	await wait(2000);
+	motor.servoWrite(500);
+	await wait(1000);
+	motor.servoWrite(2500);
+	await wait(2000);
+	motor.servoWrite(0);
+}
+
+async function wait(duration: number) {
+	return new Promise(resolve => setTimeout(resolve, duration));
+}
