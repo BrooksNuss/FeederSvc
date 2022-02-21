@@ -1,8 +1,9 @@
 import AWS from 'aws-sdk';
 import { APIGatewayProxyHandler } from 'aws-lambda';
-import { ScanInput } from 'aws-sdk/clients/dynamodb';
+import { GetItemInput, ScanInput } from 'aws-sdk/clients/dynamodb';
 import { SendMessageRequest } from 'aws-sdk/clients/sqs';
-import { FeederApiResources, FeederSqsMessage } from './models/FeederSqsMessage';
+import { FeederApiResources, FeederSqsMessage } from '../models/FeederSqsMessage';
+import { FeederInfo } from '../models/FeederInfo';
 const sqs = new AWS.SQS;
 const dynamo = new AWS.DynamoDB.DocumentClient;
 const feederQueueUrl = process.env.FEEDER_QUEUE_URL;
@@ -19,21 +20,37 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 	
 	try {
 		const id = event.pathParameters?.id || '';
+		const queryResult = await getFeeder(id);
+		const feeder: FeederInfo = queryResult.Item as FeederInfo;
+		if (!feeder) {
+			throw `Could not find feeder with id {${id}}`;
+		}
+
 		switch (event.resource as FeederApiResources) {
 		case '/activate/{id}':
-			body = await postSqsMessage({id, type: 'activate'});
+			console.log('Received activate message for feeder {%s}', id);
+			if (feeder.status === 'OFFLINE') {
+				throw `Feeder {${id}} is offline`;
+			} else {
+				body = postSqsMessage({id, type: 'activate'});
+			}
 			break;
 		case '/list-info':
+			console.log('Received get list message');
 			body = await getFeederList();
 			break;
 		case '/skip/{id}':
-			body = await postSqsMessage({id, type: 'skip'});
+			console.log('Received skip message for feeder {%s}', id);
+			if (feeder.status === 'OFFLINE') {
+				throw `Feeder {${id}} is offline`;
+			} else {
+				body = postSqsMessage({id, type: 'skip'});
+			}
 			break;
 		case '/toggle-enabled/{id}':
-			body = await postSqsMessage({id, type: 'toggle-enabled'});
+			console.log('Received toggle message for feeder {%s}', id);
+			body = postSqsMessage({id, type: 'toggle-enabled'});
 			break;
-			
-		default:
 		}
 	} catch (err: any) {
 		console.error(err);
@@ -58,11 +75,21 @@ async function getFeederList() {
 	return dynamo.scan(params).promise();
 }
 
-async function postSqsMessage(body: FeederSqsMessage) {
+function getFeeder(id: string) {
+	console.log('Fetching feeder by id: ' + id);
+	const params: GetItemInput = {
+		TableName: 'feeders',
+		Key: {id: {S: id}}
+	};
+	return dynamo.get(params).promise();
+}
+
+function postSqsMessage(body: FeederSqsMessage) {
 	console.log('Posting message to SQS');
 	const params: SendMessageRequest = {
 		QueueUrl: feederQueueUrl || '',
 		MessageBody: JSON.stringify(body)
 	};
-	return sqs.sendMessage(params).promise();
+	sqs.sendMessage(params);
+	return 'Success';
 }

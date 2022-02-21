@@ -1,7 +1,9 @@
 import {Consumer} from 'sqs-consumer';
 import AWS from 'aws-sdk';
 import { Agent } from 'https';
-import { Gpio } from 'pigpio';
+import { FeederSqsMessage } from '../models/FeederSqsMessage';
+import FeederConfig from './feeders.json';
+// import { Gpio } from 'pigpio';
 
 console.log('Starting pi feeder server.');
 const credentials = new AWS.SharedIniFileCredentials({profile: 'pi-sqs-consumer'});
@@ -41,6 +43,14 @@ const getQueueUrl = async () => {
 		handleMessage: async (message) => {
 			//TODO: add some handlers here and there
 			console.log(message);
+			const body: FeederSqsMessage = message.Body ? JSON.parse(message.Body) : '';
+			const feeder = FeederConfig.Feeders.find(feeder => feeder.id === body.id);
+			if (feeder) {
+				switch(body['type']) {
+				case 'activate':
+					activateMotor(feeder.pin);
+				}
+			}
 		},
 		sqs
 	});
@@ -58,15 +68,15 @@ const getQueueUrl = async () => {
 })();
 
 async function activateMotor(pin: number) {
-	const motor = new Gpio(10, {mode: Gpio.OUTPUT});
-	// rotate 2s, reverse .5s (helps prevent getting stuck), rotate 2s again
-	motor.servoWrite(2500);
-	await wait(2000);
-	motor.servoWrite(500);
-	await wait(1000);
-	motor.servoWrite(2500);
-	await wait(2000);
-	motor.servoWrite(0);
+// 	const motor = new Gpio(10, {mode: Gpio.OUTPUT});
+// 	// rotate 2s, reverse .5s (helps prevent getting stuck), rotate 2s again
+// 	motor.servoWrite(2500);
+// 	await wait(2000);
+// 	motor.servoWrite(500);
+// 	await wait(1000);
+// 	motor.servoWrite(2500);
+// 	await wait(2000);
+// 	motor.servoWrite(0);
 }
 
 async function wait(duration: number) {

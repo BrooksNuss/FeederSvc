@@ -1,0 +1,12 @@
+{
+	"Feeders": [
+		{
+			"id": "mainFeeder",
+			"pin": 10
+		},
+		{
+			"id": "treatsFeeder",
+			"pin": 10
+		}
+	]
+}
