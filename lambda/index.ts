@@ -34,7 +34,6 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 			} else {
 				try {
 					await postSqsMessage({id, type: 'activate'});
-					// Make db update here. await it and return the new db item instead of just success
 					body = 'Success';
 				} catch(e) {
 					console.error(e);
