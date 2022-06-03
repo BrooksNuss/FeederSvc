@@ -22,7 +22,11 @@
             "script": "start-pi",
             "problemMatcher": [],
             "label": "npm: start-pi",
-            "detail": "node ./dist/pi/app"
+            "detail": "node ./dist/pi/app",
+			"dependsOn": [
+				"npm: build-pi"
+			],
+			"dependsOrder": "sequence"
         }
     ]
 }

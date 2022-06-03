@@ -8,8 +8,8 @@
             "type": "node",
             "request": "launch",
             "name": "Pi SQS consumer",
-            "program": "${workspaceFolder}/dist/app.js",
-            "preLaunchTask": "tsc: build - tsconfig.json",
+            "program": "${workspaceFolder}/dist/pi/app.js",
+            "preLaunchTask": "npm: build-pi",
             "autoAttachChildProcesses": true,
             "outFiles": [
                 "${workspaceFolder}/dist/**/*.js"

@@ -1,8 +1,8 @@
 import {Consumer} from 'sqs-consumer';
 import AWS from 'aws-sdk';
 import { Agent } from 'https';
-import { FeederSqsMessage } from '../models/FeederSqsMessage';
-import FeederConfig from './feeders.json';
+import { FeederSqsMessage, UpdateFields } from '../models/FeederSqsMessage';
+import * as FeederConfig from './feeders.json';
 import { Gpio } from 'pigpio';
 import { FeederInfo } from '../models/FeederInfo';
 
@@ -11,10 +11,12 @@ const credentials = new AWS.SharedIniFileCredentials({profile: 'pi-sqs-consumer'
 const region = 'us-east-1';
 const queueName = 'FeederQueue';
 const awslocal = AWS.config;
-const dynamo = new AWS.DynamoDB.DocumentClient;
 AWS.config.region = region;
 AWS.config.credentials = credentials;
-
+const dynamo = new AWS.DynamoDB.DocumentClient({
+	region: region,
+	credentials: credentials
+});
 const sqs = new AWS.SQS({
 	httpOptions: {
 		agent: new Agent({
@@ -46,16 +48,20 @@ const getQueueUrl = async () => {
 			//TODO: add some handlers here and there
 			console.log(message);
 			const body: FeederSqsMessage = message.Body ? JSON.parse(message.Body) : '';
-			const feeder = FeederConfig.Feeders.find(feeder => feeder.id === body.id);
+			const feeder: FeederConfig | undefined = FeederConfig.Feeders.find((feeder: any) => feeder.id === body.id);
 			let res;
 			if (feeder) {
-				switch(body['type']) {
+				switch(body.type) {
 				case 'activate':
-					res = await activateMotor(feeder.pin);
-					if (res) {
+					console.log(`Activating feeder [${feeder.id}] motor`);
+					res = await activateMotor(feeder);
+					// if (res) {
 						updateFeeder(body.id);
-					}
+					// }
 					break;
+				case 'update':
+					console.log(`Updating feeder [${feeder.id}]`);
+					updateFeeder(body.id, body.fields);
 				}
 			} else {
 				throw `Could not find feeder with id {${body.id}}`;
@@ -76,16 +82,18 @@ const getQueueUrl = async () => {
 	console.log('Server started.');
 })();
 
-async function activateMotor(pin: number): Promise<boolean> {
-	const motor = new Gpio(pin, {mode: Gpio.OUTPUT});
-	// rotate 2s, reverse .5s (helps prevent getting stuck), rotate 2s again
+async function activateMotor(feeder: FeederConfig): Promise<boolean> {
 	try {
+		const motor = new Gpio(feeder.pin, {mode: Gpio.OUTPUT});
+		// rotate 2s, reverse 1s (helps prevent getting stuck), repeat
 		motor.servoWrite(2500);
-		await wait(2000);
+		await wait(feeder.feedTimer);
 		motor.servoWrite(500);
-		await wait(1000);
+		await wait(feeder.feedTimer);
 		motor.servoWrite(2500);
-		await wait(2000);
+		await wait(feeder.feedTimer);
+		motor.servoWrite(500);
+		await wait(feeder.feedTimer);
 		motor.servoWrite(0);
 	} catch (e) {
 		console.error(e);
@@ -98,38 +106,74 @@ async function wait(duration: number) {
 	return new Promise(resolve => setTimeout(resolve, duration));
 }
 
-async function updateFeeder(id: string): Promise<void> {
+async function updateFeeder(id: string, updateFields?: UpdateFields[]): Promise<void> {
 	console.log('Fetching feeder by id: ' + id);
 	// key type in docs is different from what the sdk expects. type should be GetItemInput
 	const getParams = {
 		TableName: 'feeders',
 		Key: {id}
 	};
-	const queryResult = await dynamo.get(getParams).promise();
-	const feeder: FeederInfo = queryResult.Item as FeederInfo;
-	udpateFeederTimer(feeder);
-	const updateParams = {
-		TableName: 'feeders',
-		Key:{ id },
-		UpdateExpression: 'set info.nextActive = :n, info.lastActive=:l',
-		ExpressionAttributeValues:{
-			':n': feeder.nextActive,
-			':l': feeder.lastActive
-		}
-	};
-	const res = await dynamo.update(updateParams).promise();
-	if (res) {
-		console.log('Successfully updated db record for feeder {%s}', id);
+	let queryResult;
+	let feeder: FeederInfo;
+	try {
+		queryResult = await dynamo.get(getParams).promise();
+		feeder = queryResult.Item as FeederInfo;
+	} catch (e) {
+		console.error(`Failed to get feeder with id [${id}] from DynamoDB.`);
+		console.error(e);
+		return;
+	}
+	let updateParams;
+	if (updateFields) {
+		let updateExpression = 'set ';
+		const expressionValues = {};
+		updateFields.forEach((field, index) => {
+			const fieldValueName = '=:' + field.key;
+			updateExpression += field.key + fieldValueName + (index === updateFields.length ? '' : ', ');
+			(expressionValues as any)[fieldValueName] = field.value;
+		});
+		updateParams = {
+			TableName: 'feeders',
+			Key:{ id },
+			UpdateExpression: updateExpression,
+			ExpressionAttributeValues: expressionValues
+		};
 	} else {
-		console.error('Error when writing db record for feeder {%s}', id);
-		console.error(res);
+		updateFeederDetail(feeder);
+		updateParams = {
+			TableName: 'feeders',
+			Key:{ id },
+			UpdateExpression: 'set nextActive=:n, lastActive=:l, estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
+			ExpressionAttributeValues:{
+				':n': feeder.nextActive,
+				':l': feeder.lastActive,
+				':erfood': feeder.estRemainingFood,
+				':erfeedings': feeder.estRemainingFeedings
+			}
+		};
+	}
+	try {
+		const res = await dynamo.update(updateParams).promise();
+		if (res) {
+			console.log('Successfully updated db record for feeder {%s}', id);
+		} else {
+			console.error('Error when writing db record for feeder {%s}', id);
+			console.error(res);
+		}
+	} catch (e) {
+		console.error(`Failed to get feeder with id [${id}] from DynamoDB.`);
+		console.error(e);
 	}
 }
 
-function udpateFeederTimer(feeder: FeederInfo): void {
+function updateFeederDetail(feeder: FeederInfo): void {
 	const now = Date.now();
 	const intervalValues = feeder.interval.split(':');
 	const newInterval = new Date(0).setHours(parseInt(intervalValues[0]), parseInt(intervalValues[1]));
-	feeder.nextActive = JSON.stringify(now + newInterval);
-	feeder.lastActive = JSON.stringify(now);
+	feeder.nextActive = now + newInterval;
+	feeder.lastActive = now;
+	feeder.estRemainingFood = Math.max(feeder.estRemainingFood - feeder.estFoodPerFeeding, 0);
+	feeder.estRemainingFeedings = feeder.estRemainingFood / feeder.estFoodPerFeeding;
 }
+
+type FeederConfig = {id: string, pin: number, feedTimer: number};

@@ -20,17 +20,17 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 	
 	try {
 		const id = event.pathParameters?.id || '';
-		const queryResult = await getFeeder(id);
-		const feeder: FeederInfo = queryResult.Item as FeederInfo;
-		if (!feeder) {
-			throw `Could not find feeder with id {${id}}`;
-		}
+		const fields = event.body ? JSON.parse(event.body) : null;
+		const feeder = id ? await getFeeder(id) : null;
 
 		switch (event.resource as FeederApiResources) {
 		case '/activate/{id}':
+			if (!feeder) {
+				throw `Could not find feeder with id [${id}]`;
+			}
 			console.log('Received activate message for feeder {%s}', id);
 			if (feeder.status === 'OFFLINE') {
-				throw `Feeder {${id}} is offline`;
+				throw `Feeder [${id}] is offline`;
 			} else {
 				try {
 					await postSqsMessage({id, type: 'activate'});
@@ -46,9 +46,12 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 			body = await getFeederList();
 			break;
 		case '/skip/{id}':
+			if (!feeder) {
+				throw `Could not find feeder with id [${id}]`;
+			}
 			console.log('Received skip message for feeder {%s}', id);
 			if (feeder.status === 'OFFLINE') {
-				throw `Feeder {${id}} is offline`;
+				throw `Feeder [${id}] is offline`;
 			} else {
 				try {
 					await postSqsMessage({id, type: 'skip'});
@@ -60,6 +63,9 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 			}
 			break;
 		case '/toggle-enabled/{id}':
+			if (!feeder) {
+				throw `Could not find feeder with id [${id}]`;
+			}
 			console.log('Received toggle message for feeder {%s}', id);
 			try {
 				await postSqsMessage({id, type: 'toggle-enabled'});
@@ -69,6 +75,18 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 				body = 'Error posting SQS message: ' + e;
 			}
 			break;
+		case '/update/{id}':
+			if (!feeder) {
+				throw `Could not find feeder with id [${id}]`;
+			}
+			console.log('Received toggle message for feeder {%s}', id);
+			try {
+				await postSqsMessage({id, type: 'update', fields });
+				body = 'Success';
+			} catch(e) {
+				console.error(e);
+				body = 'Error posting SQS message: ' + e;
+			}
 		}
 	} catch (err: any) {
 		console.error(err);
@@ -85,22 +103,24 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 	};
 };
 
-async function getFeederList() {
+async function getFeederList(): Promise<FeederInfo[]> {
 	console.log('Fetching feeder list from DynamoDB');
 	const params: ScanInput = {
 		TableName: 'feeders'
 	};
-	return dynamo.scan(params).promise();
+	const queryResult = dynamo.scan(params).promise();
+	return (await queryResult).Items as FeederInfo[];
 }
 
-function getFeeder(id: string) {
+async function getFeeder(id: string): Promise<FeederInfo> {
 	console.log('Fetching feeder by id: ' + id);
 	// key type in docs is different from what the sdk expects. type should be GetItemInput
 	const params = {
 		TableName: 'feeders',
 		Key: {id}
 	};
-	return dynamo.get(params).promise();
+	const queryResult = await dynamo.get(params).promise();
+	return queryResult.Item as FeederInfo;
 }
 
 async function postSqsMessage(body: FeederSqsMessage) {
