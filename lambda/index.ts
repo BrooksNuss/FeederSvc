@@ -79,7 +79,7 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 			if (!feeder) {
 				throw `Could not find feeder with id [${id}]`;
 			}
-			console.log('Received toggle message for feeder {%s}', id);
+			console.log('Received update message for feeder {%s}', id);
 			try {
 				await postSqsMessage({id, type: 'update', fields });
 				body = 'Success';

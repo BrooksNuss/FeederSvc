@@ -5,6 +5,7 @@ import { FeederSqsMessage, UpdateFields } from '../models/FeederSqsMessage';
 import * as FeederConfig from './feeders.json';
 import { Gpio } from 'pigpio';
 import { FeederInfo } from '../models/FeederInfo';
+import { DateTime, Duration } from 'luxon';
 
 console.log('Starting pi feeder server.');
 const credentials = new AWS.SharedIniFileCredentials({profile: 'pi-sqs-consumer'});
@@ -56,12 +57,17 @@ const getQueueUrl = async () => {
 					console.log(`Activating feeder [${feeder.id}] motor`);
 					res = await activateMotor(feeder);
 					// if (res) {
-						updateFeeder(body.id);
+						updateFeeder(body.id, undefined, true);
 					// }
 					break;
 				case 'update':
 					console.log(`Updating feeder [${feeder.id}]`);
 					updateFeeder(body.id, body.fields);
+					break;
+				case 'skip':
+					console.log(`Resetting timer of feeder [${feeder.id}]`);
+					updateFeeder(body.id);
+					break;
 				}
 			} else {
 				throw `Could not find feeder with id {${body.id}}`;
@@ -106,7 +112,7 @@ async function wait(duration: number) {
 	return new Promise(resolve => setTimeout(resolve, duration));
 }
 
-async function updateFeeder(id: string, updateFields?: UpdateFields[]): Promise<void> {
+async function updateFeeder(id: string, updateFields?: UpdateFields, activated?: boolean): Promise<void> {
 	console.log('Fetching feeder by id: ' + id);
 	// key type in docs is different from what the sdk expects. type should be GetItemInput
 	const getParams = {
@@ -125,32 +131,42 @@ async function updateFeeder(id: string, updateFields?: UpdateFields[]): Promise<
 	}
 	let updateParams;
 	if (updateFields) {
+		if (updateFields.estRemainingFood) {
+			updateFields.estRemainingFeedings = Math.floor(updateFields.estRemainingFood / feeder.estFoodPerFeeding);
+		}
 		let updateExpression = 'set ';
 		const expressionValues = {};
-		updateFields.forEach((field, index) => {
-			const fieldValueName = '=:' + field.key;
-			updateExpression += field.key + fieldValueName + (index === updateFields.length ? '' : ', ');
-			(expressionValues as any)[fieldValueName] = field.value;
+		const expressionNames = {};
+		const updateList = Object.entries(updateFields);
+		updateList.forEach((pair, index) => {
+			const expressionAttrValue = ':' + pair[0];
+			const expressionAttrName = '#' + pair[0];
+			updateExpression += expressionAttrName + '=' + expressionAttrValue + (index === updateList.length - 1 ? '' : ', ');
+			(expressionValues as any)[expressionAttrValue] = pair[1];
+			(expressionNames as any)[expressionAttrName] = pair[0];
 		});
 		updateParams = {
 			TableName: 'feeders',
 			Key:{ id },
 			UpdateExpression: updateExpression,
-			ExpressionAttributeValues: expressionValues
+			ExpressionAttributeValues: expressionValues,
+			ExpressionAttributeNames: expressionNames
 		};
 	} else {
-		updateFeederDetail(feeder);
+		updateFeederDetailAfterActivating(feeder, activated);
 		updateParams = {
 			TableName: 'feeders',
 			Key:{ id },
-			UpdateExpression: 'set nextActive=:n, lastActive=:l, estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
+			UpdateExpression: 'set nextActive=:n' + (activated ? ', lastActive=:l' : '') + ', estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
 			ExpressionAttributeValues:{
 				':n': feeder.nextActive,
-				':l': feeder.lastActive,
 				':erfood': feeder.estRemainingFood,
 				':erfeedings': feeder.estRemainingFeedings
 			}
 		};
+		if (activated) {
+			(updateParams.ExpressionAttributeValues as any)[':l'] = feeder.lastActive;
+		}
 	}
 	try {
 		const res = await dynamo.update(updateParams).promise();
@@ -161,19 +177,21 @@ async function updateFeeder(id: string, updateFields?: UpdateFields[]): Promise<
 			console.error(res);
 		}
 	} catch (e) {
-		console.error(`Failed to get feeder with id [${id}] from DynamoDB.`);
+		console.error(`Failed to update feeder with id [${id}] in DynamoDB.`);
 		console.error(e);
 	}
 }
 
-function updateFeederDetail(feeder: FeederInfo): void {
-	const now = Date.now();
+function updateFeederDetailAfterActivating(feeder: FeederInfo, activated?: boolean): void {
 	const intervalValues = feeder.interval.split(':');
-	const newInterval = new Date(0).setHours(parseInt(intervalValues[0]), parseInt(intervalValues[1]));
-	feeder.nextActive = now + newInterval;
-	feeder.lastActive = now;
-	feeder.estRemainingFood = Math.max(feeder.estRemainingFood - feeder.estFoodPerFeeding, 0);
-	feeder.estRemainingFeedings = feeder.estRemainingFood / feeder.estFoodPerFeeding;
+	const now = DateTime.now();
+	const newInterval = Duration.fromObject({hours: parseInt(intervalValues[0]), minutes: parseInt(intervalValues[1])});
+	feeder.nextActive = now.plus(newInterval).toMillis();
+	feeder.lastActive = now.toMillis();
+	if (activated) {
+		feeder.estRemainingFood = Math.max(feeder.estRemainingFood - feeder.estFoodPerFeeding, 0);
+		feeder.estRemainingFeedings = feeder.estRemainingFood / feeder.estFoodPerFeeding;
+	}
 }
 
 type FeederConfig = {id: string, pin: number, feedTimer: number};
