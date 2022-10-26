@@ -2,22 +2,22 @@ import { Consumer } from 'sqs-consumer-v3';
 import { fromIni } from '@aws-sdk/credential-providers';
 import { SQS } from '@aws-sdk/client-sqs';
 import { DynamoDB, UpdateItemCommandInput, GetItemCommandInput, GetItemCommandOutput, AttributeValue } from '@aws-sdk/client-dynamodb';
-import { ApiGatewayV2 } from '@aws-sdk/client-apigatewayv2';
+import { APIGateway } from '@aws-sdk/client-api-gateway';
 import { FeederSqsMessage, UpdateFields } from '../models/FeederSqsMessage';
 import * as FeederConfig from './feeders.json';
 import { Gpio } from 'pigpio';
 import { FeederInfo } from '../models/FeederInfo';
 import { HomeWebsocketUpdateRequest } from '../models/HomeWebsocketUpdateRequest';
 import { DateTime, Duration } from 'luxon';
+import { aws4Interceptor } from 'aws4-axios';
 import axios from 'axios';
 
 console.log('Starting pi feeder server.');
-// const credentials = new AWS.SharedIniFileCredentials({profile: 'pi-sqs-consumer'});
 const credentials = fromIni({profile: 'pi-sqs-consumer'});
 const region = 'us-east-1';
 const queueName = 'FeederQueue';
-const wsApiName = 'HomeWS';
-let wsApiUrl: string;
+const wsApiName = 'HomeWSListener';
+let pnsUrl: string;
 
 const dynamo = new DynamoDB({
 	region: region,
@@ -27,10 +27,10 @@ const sqs = new SQS({
 	region: region,
 	credentials: credentials
 });
-const apigw = new ApiGatewayV2({
+const apigw = new APIGateway({
 	region: region,
 	credentials: credentials
-})
+});
 
 const getQueueUrl = async () => {
 	const queueList = (await sqs.listQueues({})).QueueUrls;
@@ -45,25 +45,33 @@ const getQueueUrl = async () => {
 	return queueUrl;
 };
 
-const getWSApiUrl = async () => {
-	const apiList = (await apigw.getApis({})).Items;
-	const wsApi = apiList?.find(api => api.Name?.includes(wsApiName));
+const getPNSUrl = async () => {
+	const apiList = (await apigw.getRestApis({})).items;
+	const pnsApi = apiList?.find(api => api.name?.includes(wsApiName));
 
-	if (!wsApi) {
+	if (!pnsApi) {
 		console.error('Specified API does not exist');
 		return;
 	}
-	console.log('Websocket API with name [' + wsApiName + '] found');
+	console.log('API with name [' + wsApiName + '] found');
 
-	return wsApi.ApiEndpoint?.replace('wss', 'https') + '/dev/@connections';
+	return 'https://' + pnsApi.id + '.execute-api.' + region + '.amazonaws.com' + '/dev/sendnotification';
 };
 
 (async () => {
 	const queueUrl = await getQueueUrl();
-	wsApiUrl = await getWSApiUrl() || '';
-	if (!wsApiUrl) {
+	pnsUrl = await getPNSUrl() || '';
+	if (!pnsUrl) {
 		console.error('Failed to fetch websocket API endpoint.');
 	}
+	const interceptor = aws4Interceptor(
+		{
+			region: region,
+			service: "execute-api",
+		},
+		await credentials()
+	);
+	axios.interceptors.request.use(interceptor);
 
 	const sqsConsumer = Consumer.create({
 		queueUrl,
@@ -171,7 +179,7 @@ async function updateFeeder(id: string, updateFields?: UpdateFields, activated?:
 			const expressionAttrValue = ':' + pair[0];
 			const expressionAttrName = '#' + pair[0];
 			updateExpression += expressionAttrName + '=' + expressionAttrValue + (index === updateList.length - 1 ? '' : ', ');
-			(expressionValues as any)[expressionAttrValue] = pair[1];
+			(expressionValues as any)[expressionAttrValue] = createAttributeValue(pair[1]);
 			(expressionNames as any)[expressionAttrName] = pair[0];
 		});
 		updateParams = {
@@ -193,23 +201,22 @@ async function updateFeeder(id: string, updateFields?: UpdateFields, activated?:
 			},
 			UpdateExpression: 'set nextActive=:n' + (activated ? ', lastActive=:l' : '') + ', estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
 			ExpressionAttributeValues:{
-				':n': { S: feeder.nextActive.toString() },
-				':erfood': { S: feeder.estRemainingFood.toString() },
-				':erfeedings': { S: feeder.estRemainingFeedings.toString() }
+				':n': { N: feeder.nextActive.toString() },
+				':erfood': { N: feeder.estRemainingFood.toString() },
+				':erfeedings': { N: feeder.estRemainingFeedings.toString() }
 			},
 			ReturnValues: 'ALL_NEW'
 		};
 		if (activated) {
-			(updateParams.ExpressionAttributeValues as any)[':l'] = feeder.lastActive;
+			(updateParams.ExpressionAttributeValues as any)[':l'] = { N: feeder.lastActive.toString() };
 		}
 	}
 	try {
-		//TODO: FIX HERE
 		const res = await dynamo.updateItem(updateParams);
 		if (res) {
 			console.log('Successfully updated db record for feeder {%s}', id);
 			if (res.Attributes) {
-				sendWebsocketUpdate({action: 'sendNotification', type: 'feederUpdate', value: res.Attributes as any});
+				sendWebsocketUpdate({action: 'sendNotification', type: 'feederUpdate', value: extractValuesFromDbResult<FeederInfo>(res.Attributes)});
 			}
 		} else {
 			console.error('Error when writing db record for feeder {%s}', id);
@@ -234,12 +241,12 @@ function updateFeederDetailAfterActivating(feeder: FeederInfo, activated?: boole
 }
 
 async function sendWebsocketUpdate(update: HomeWebsocketUpdateRequest): Promise<void> {
-	if (!wsApiUrl) {
-		console.warn('Websocket API url is not defined. Skipping update.');
+	if (!pnsUrl) {
+		console.warn('PNS url is not defined. Skipping update.');
 		return;
 	}
 	try {
-		const res = await axios.post(wsApiUrl, update);
+		const res = await axios.post(pnsUrl, update);
 		console.log(res);
 	} catch (e) {
 		console.error('Error sending push notification for feeder update.', e);
@@ -257,6 +264,10 @@ function extractValuesFromDbResult<T>(res: Record<string, AttributeValue>): T {
 		}
 	});
 	return result as T;
+}
+
+function createAttributeValue(value: string | number): AttributeValue {
+	return typeof value === 'string' ? { S: value } : { N: value.toString() };
 }
 
 type FeederConfig = {id: string, pin: number, feedTimer: number};
