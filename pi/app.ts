@@ -7,7 +7,7 @@ import { FeederSqsMessage, UpdateFields } from '../models/FeederSqsMessage';
 import * as FeederConfig from './feeders.json';
 import { Gpio } from 'pigpio';
 import { FeederInfo } from '../models/FeederInfo';
-import { HomeWebsocketUpdateRequest } from '../models/HomeWebsocketUpdateRequest';
+import { HomeWSSendNotificationRequest } from '../models/HomeWebsocketUpdateRequest';
 import { DateTime, Duration } from 'luxon';
 import { aws4Interceptor } from 'aws4-axios';
 import axios from 'axios';
@@ -216,7 +216,7 @@ async function updateFeeder(id: string, updateFields?: UpdateFields, activated?:
 		if (res) {
 			console.log('Successfully updated db record for feeder {%s}', id);
 			if (res.Attributes) {
-				sendWebsocketUpdate({action: 'sendNotification', type: 'feederUpdate', value: extractValuesFromDbResult<FeederInfo>(res.Attributes)});
+				sendWebsocketUpdate({action: 'sendNotification', subscriptionType: 'feederUpdate', value: extractValuesFromDbResult<FeederInfo>(res.Attributes)});
 			}
 		} else {
 			console.error('Error when writing db record for feeder {%s}', id);
@@ -240,7 +240,7 @@ function updateFeederDetailAfterActivating(feeder: FeederInfo, activated?: boole
 	}
 }
 
-async function sendWebsocketUpdate(update: HomeWebsocketUpdateRequest): Promise<void> {
+async function sendWebsocketUpdate(update: HomeWSSendNotificationRequest): Promise<void> {
 	if (!pnsUrl) {
 		console.warn('PNS url is not defined. Skipping update.');
 		return;

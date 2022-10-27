@@ -1,10 +1,10 @@
 import { FeederInfo } from './FeederInfo';
 
-export interface HomeWebsocketUpdateRequest {
-	action: HomeWebsocketUpdateActionType,
-	type: HomeWebsocketUpdateRequestType,
+export interface HomeWSSendNotificationRequest {
+	action: HomeWSActionType,
+	subscriptionType: HomeWSSubscriptionType,
 	value: FeederInfo;
 }
 
-export type HomeWebsocketUpdateActionType = 'sendNotification' | 'broadcastNotification';
-export type HomeWebsocketUpdateRequestType = 'feederUpdate';
+export type HomeWSActionType = 'sendNotification';
+export type HomeWSSubscriptionType = 'feederUpdate';

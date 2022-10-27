@@ -1,11 +1,10 @@
-import AWS from 'aws-sdk';
 import { APIGatewayProxyHandler } from 'aws-lambda';
-import { GetItemInput, ScanInput } from 'aws-sdk/clients/dynamodb';
-import { SendMessageRequest } from 'aws-sdk/clients/sqs';
+import { SQS, SendMessageCommandInput } from '@aws-sdk/client-sqs';
+import { DynamoDB, GetItemCommandInput, ScanCommandInput } from '@aws-sdk/client-dynamodb';
 import { FeederApiResources, FeederSqsMessage } from '../models/FeederSqsMessage';
 import { FeederInfo } from '../models/FeederInfo';
-const sqs = new AWS.SQS;
-const dynamo = new AWS.DynamoDB.DocumentClient;
+const sqs = new SQS({});
+const dynamo = new DynamoDB({});
 const feederQueueUrl = process.env.FEEDER_QUEUE_URL;
 
 export const handler: APIGatewayProxyHandler = async (event, context) => {
@@ -105,29 +104,30 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 
 async function getFeederList(): Promise<FeederInfo[]> {
 	console.log('Fetching feeder list from DynamoDB');
-	const params: ScanInput = {
+	const params: ScanCommandInput = {
 		TableName: 'feeders'
 	};
-	const queryResult = dynamo.scan(params).promise();
-	return (await queryResult).Items as FeederInfo[];
+	const queryResult = dynamo.scan(params);
+	return (await queryResult).Items as unknown as FeederInfo[];
 }
 
 async function getFeeder(id: string): Promise<FeederInfo> {
 	console.log('Fetching feeder by id: ' + id);
-	// key type in docs is different from what the sdk expects. type should be GetItemInput
-	const params = {
+	const params: GetItemCommandInput = {
 		TableName: 'feeders',
-		Key: {id}
+		Key: { id: {
+			S: id
+		}}
 	};
-	const queryResult = await dynamo.get(params).promise();
-	return queryResult.Item as FeederInfo;
+	const queryResult = await dynamo.getItem(params);
+	return queryResult.Item as unknown as FeederInfo;
 }
 
 async function postSqsMessage(body: FeederSqsMessage) {
 	console.log('Posting message to SQS');
-	const params: SendMessageRequest = {
+	const params: SendMessageCommandInput = {
 		QueueUrl: feederQueueUrl || '',
 		MessageBody: JSON.stringify(body)
 	};
-	return sqs.sendMessage(params).promise();
+	return sqs.sendMessage(params);
 }
