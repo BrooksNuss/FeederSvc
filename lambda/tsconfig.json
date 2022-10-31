@@ -5,6 +5,7 @@
 	},
 	"extends": "../tsconfig.json",
 	"include": [
-		"./"
+		"./index.ts",
+		"./updateModulePaths.ts"
 	]
 }
