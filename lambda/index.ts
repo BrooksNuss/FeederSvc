@@ -1,10 +1,11 @@
 import { APIGatewayProxyHandler } from 'aws-lambda';
 import { SQS, SendMessageCommandInput } from '@aws-sdk/client-sqs';
-import { DynamoDB, GetItemCommandInput, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import { DynamoDB } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocument, GetCommandInput, ScanCommandInput } from '@aws-sdk/lib-dynamodb';
 import { FeederApiResources, FeederSqsMessage } from '../models/FeederSqsMessage';
 import { FeederInfo } from '../models/FeederInfo';
 const sqs = new SQS({});
-const dynamo = new DynamoDB({});
+const dynamoClient = DynamoDBDocument.from(new DynamoDB({}));
 const feederQueueUrl = process.env.FEEDER_QUEUE_URL;
 
 export const handler: APIGatewayProxyHandler = async (event, context) => {
@@ -107,19 +108,17 @@ async function getFeederList(): Promise<FeederInfo[]> {
 	const params: ScanCommandInput = {
 		TableName: 'feeders'
 	};
-	const queryResult = dynamo.scan(params);
+	const queryResult = dynamoClient.scan(params);
 	return (await queryResult).Items as unknown as FeederInfo[];
 }
 
 async function getFeeder(id: string): Promise<FeederInfo> {
 	console.log('Fetching feeder by id: ' + id);
-	const params: GetItemCommandInput = {
+	const params: GetCommandInput = {
 		TableName: 'feeders',
-		Key: { id: {
-			S: id
-		}}
+		Key: { id: id }
 	};
-	const queryResult = await dynamo.getItem(params);
+	const queryResult = await dynamoClient.get(params);
 	return queryResult.Item as unknown as FeederInfo;
 }
 
