@@ -5,7 +5,7 @@ export interface FeederSqsMessage {
 }
 
 export type FeederApiType = 'activate' | 'list-info' | 'skip' | 'toggle-enabled' | 'update';
-export type FeederApiResources = '/activate/{id}' | '/list-info' | '/skip/{id}' | '/toggle-enabled/{id}' | '/update/{id}';
+export type FeederApiResources = '/activate/{id}' | '/list-info' | '/skip/{id}' | '/toggle-enabled/{id}' | '/update/{id}' | '/postaction/{id}';
 
 export interface UpdateFields {
     id?: string;

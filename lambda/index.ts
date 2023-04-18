@@ -87,6 +87,10 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 				console.error(e);
 				body = 'Error posting SQS message: ' + e;
 			}
+			break;
+		case '/postaction/{id}':
+			// stuff goes here for handling db updates/websocket updates. called directly from the feeder.
+			break;
 		}
 	} catch (err: any) {
 		console.error(err);

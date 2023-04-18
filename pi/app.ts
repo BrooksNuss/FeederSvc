@@ -17,7 +17,7 @@ const credentials = fromIni({profile: 'pi-sqs-consumer'});
 const region = 'us-east-1';
 const queueName = 'FeederQueue';
 const wsApiName = 'HomeWSListener';
-let pnsUrl: string;
+let websocketUrl: string;
 
 const dynamo = new DynamoDB({
 	region: region,
@@ -45,23 +45,23 @@ const getQueueUrl = async () => {
 	return queueUrl;
 };
 
-const getPNSUrl = async () => {
+const getwebsocketUrl = async () => {
 	const apiList = (await apigw.getRestApis({})).items;
-	const pnsApi = apiList?.find(api => api.name?.includes(wsApiName));
+	const websocketApi = apiList?.find(api => api.name?.includes(wsApiName));
 
-	if (!pnsApi) {
+	if (!websocketApi) {
 		console.error('Specified API does not exist');
 		return;
 	}
 	console.log('API with name [' + wsApiName + '] found');
 
-	return 'https://' + pnsApi.id + '.execute-api.' + region + '.amazonaws.com' + '/dev/sendnotification';
+	return 'https://' + websocketApi.id + '.execute-api.' + region + '.amazonaws.com' + '/dev/sendnotification';
 };
 
 (async () => {
 	const queueUrl = await getQueueUrl();
-	pnsUrl = await getPNSUrl() || '';
-	if (!pnsUrl) {
+	websocketUrl = await getwebsocketUrl() || '';
+	if (!websocketUrl) {
 		console.error('Failed to fetch websocket API endpoint.');
 	}
 	const interceptor = aws4Interceptor(
@@ -241,12 +241,12 @@ function updateFeederDetailAfterActivating(feeder: FeederInfo, activated?: boole
 }
 
 async function sendWebsocketUpdate(update: HomeWSSendNotificationRequest): Promise<void> {
-	if (!pnsUrl) {
-		console.warn('PNS url is not defined. Skipping update.');
+	if (!websocketUrl) {
+		console.warn('websocket url is not defined. Skipping update.');
 		return;
 	}
 	try {
-		const res = await axios.post(pnsUrl, update);
+		const res = await axios.post(websocketUrl, update);
 		console.log(res);
 	} catch (e) {
 		console.error('Error sending push notification for feeder update.', e);
