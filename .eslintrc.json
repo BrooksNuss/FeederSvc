@@ -26,7 +26,8 @@
         ],
         "indent": [
             "warn",
-            "tab"
+            "tab",
+			{ "SwitchCase": 1}
         ]
     }
 }

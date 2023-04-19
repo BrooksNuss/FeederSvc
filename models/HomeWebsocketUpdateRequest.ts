@@ -1,6 +1,6 @@
 import { FeederInfo } from './FeederInfo';
 
-export interface HomeWSSendNotificationRequest {
+export interface HomeWSListenerSendNotificationRequest {
 	action: HomeWSActionType,
 	subscriptionType: HomeWSSubscriptionType,
 	value: FeederInfo;
