@@ -3,7 +3,6 @@ export interface FeederInfo {
     name: string;
     status: 'ONLINE' | 'OFFLINE';
     lastActive: number;
-    nextActive: number;
     interval: string;
     estRemainingFood: number;
     estRemainingFeedings: number;

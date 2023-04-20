@@ -1,19 +1,33 @@
 import { APIGatewayProxyHandler } from 'aws-lambda';
+import { fromIni } from '@aws-sdk/credential-providers';
 import { SQS, SendMessageCommandInput } from '@aws-sdk/client-sqs';
 import { DynamoDB } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocument, GetCommandInput, GetCommandOutput, ScanCommandInput, UpdateCommandInput } from '@aws-sdk/lib-dynamodb';
-import { FeederApiResources, FeederSqsMessage, FeederUpdateRequest, UpdateFields } from '../models/FeederSqsMessage';
+import { DynamoDBDocument, GetCommandInput, ScanCommandInput, UpdateCommandInput } from '@aws-sdk/lib-dynamodb';
+import { FeederApiResources, FeederSqsMessage, FeederUpdateRequest } from '../models/FeederSqsMessage';
 import { HomeWSListenerSendNotificationRequest } from '../models/HomeWebsocketUpdateRequest';
 import { FeederInfo } from '../models/FeederInfo';
-import { DateTime, Duration } from 'luxon';
+import { DateTime } from 'luxon';
+import axios from 'axios';
+import { aws4Interceptor } from 'aws4-axios';
 
 const sqs = new SQS({});
 const dynamoClient = DynamoDBDocument.from(new DynamoDB({}));
 const feederQueueUrl = process.env.FEEDER_QUEUE_URL;
 const WSApiUrl = process.env.WS_LISTENER_URL;
+const region = 'us-east-1';
+const credentials = fromIni({profile: 'pi-sqs-consumer'});
 
 export const handler: APIGatewayProxyHandler = async (event, context) => {
 	console.log('Received event:', JSON.stringify(event, null, 2));
+
+	const interceptor = aws4Interceptor(
+		{
+			region: region,
+			service: 'execute-api',
+		},
+		await credentials()
+	);
+	axios.interceptors.request.use(interceptor);
 
 	let body;
 	let statusCode = 200;
@@ -37,13 +51,8 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 				if (feeder.status === 'OFFLINE') {
 					throw `Feeder [${id}] is offline`;
 				} else {
-					try {
-						await postSqsMessage({id, type: 'activate'});
-						body = 'Success';
-					} catch(e) {
-						console.error(e);
-						body = 'Error posting SQS message: ' + e;
-					}
+					await postSqsMessage({id, type: 'activate'});
+					body = 'Success';
 				}
 				break;
 			case '/list-info':
@@ -55,38 +64,32 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 				if (feeder.status === 'OFFLINE') {
 					throw `Feeder [${id}] is offline`;
 				} else {
-					try {
-						await postSqsMessage({id, type: 'skip'});
-						body = 'Success';
-					} catch(e) {
-						console.error(e);
-						body = 'Error posting SQS message: ' + e;
-					}
+					await postSqsMessage({id, type: 'skip'});
+					body = 'Success';
 				}
 				break;
 			case '/toggle-enabled/{id}':
 				console.log('Received toggle message for feeder {%s}', id);
-				try {
-					await postSqsMessage({id, type: 'toggle-enabled'});
-					body = 'Success';
-				} catch(e) {
-					console.error(e);
-					body = 'Error posting SQS message: ' + e;
-				}
+				await postSqsMessage({id, type: 'toggle-enabled'});
+				body = 'Success';
 				break;
 			case '/update/{id}':
 				console.log('Received update message for feeder {%s}', id);
-				try {
-					await postSqsMessage({id, type: 'update', fields });
-					body = 'Success';
-				} catch(e) {
-					console.error(e);
-					body = 'Error posting SQS message: ' + e;
+				if (!requestBody) {
+					console.error('Received update request with missing body');
+					throw 'Received update request with missing body';
 				}
+				validateInterval(requestBody);
+				handleUpdate(requestBody);
+				body = 'Success';
 				break;
 			case '/postaction/{id}':
 			// stuff goes here for handling db updates/websocket updates. called directly from the feeder.
-				handleUpdate(JSON.parse(requestBody));
+				if (!requestBody) {
+					console.error('Received postaction request with missing body');
+					throw 'Received update request with missing body';
+				}
+				handleUpdate(requestBody);
 				break;
 		}
 	} catch (err: any) {
@@ -219,9 +222,8 @@ function buildActivateCommand(feeder: FeederInfo, skip = false): UpdateCommandIn
 		Key: {
 			id: feeder.id,
 		},
-		UpdateExpression: 'set nextActive=:n' + (!skip ? ', lastActive=:l' : '') + ', estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
+		UpdateExpression: 'set ' + (!skip ? 'lastActive=:l, ' : '') + 'estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
 		ExpressionAttributeValues:{
-			':n': feeder.nextActive.toString(),
 			':erfood': feeder.estRemainingFood.toString(),
 			':erfeedings': feeder.estRemainingFeedings.toString()
 		},
@@ -234,13 +236,17 @@ function buildActivateCommand(feeder: FeederInfo, skip = false): UpdateCommandIn
 }
 
 function updateFeederDetailAfterActivating(feeder: FeederInfo, skip = false): void {
-	const intervalValues = feeder.interval.split(':');
 	const now = DateTime.now();
-	const newInterval = Duration.fromObject({hours: parseInt(intervalValues[0]), minutes: parseInt(intervalValues[1])});
-	feeder.nextActive = now.plus(newInterval).toMillis();
 	feeder.lastActive = now.toMillis();
 	if (!skip) {
 		feeder.estRemainingFood = Math.max(feeder.estRemainingFood - feeder.estFoodPerFeeding, 0);
 		feeder.estRemainingFeedings = feeder.estRemainingFood / feeder.estFoodPerFeeding;
+	}
+}
+
+function validateInterval(request: FeederUpdateRequest): void {
+	const matches = request.fields?.interval?.match(/^(?:(?:[1-5]?[0-9],)*(?:[1-5]?[0-9])|\*)\s(?:(?:1?[0-9],|2[0-3],)*(?:1?[0-9]|2[0-3]))\s\*\s\*\s\?\s\*$/);
+	if (!matches) {
+		throw 'Invalid interval';
 	}
 }

@@ -1,14 +1,9 @@
 import { Consumer } from 'sqs-consumer-v3';
 import { fromIni } from '@aws-sdk/credential-providers';
 import { SQS } from '@aws-sdk/client-sqs';
-import { DynamoDB } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocument, GetCommandInput, GetCommandOutput, ScanCommandInput, UpdateCommandInput } from '@aws-sdk/lib-dynamodb';
-import { APIGateway } from '@aws-sdk/client-api-gateway';
-import { FeederSqsMessage, UpdateFields } from '../models/FeederSqsMessage';
+import { FeederSqsMessage, FeederUpdateRequest } from '../models/FeederSqsMessage';
 import * as FeederConfig from './feeders.json';
 import { Gpio } from 'pigpio';
-import { FeederInfo } from '../models/FeederInfo';
-import { DateTime, Duration } from 'luxon';
 import { aws4Interceptor } from 'aws4-axios';
 import axios from 'axios';
 
@@ -16,18 +11,9 @@ console.log('Starting pi feeder server.');
 const credentials = fromIni({profile: 'pi-sqs-consumer'});
 const region = 'us-east-1';
 const queueName = 'FeederQueue';
-const wsApiName = 'HomeWSListener';
-let websocketUrl: string;
+const feederApiUrl = process.env.FEEDER_API_URL;
 
-const dynamoClient = DynamoDBDocument.from(new DynamoDB({
-	region: region,
-	credentials: credentials
-}));
 const sqs = new SQS({
-	region: region,
-	credentials: credentials
-});
-const apigw = new APIGateway({
 	region: region,
 	credentials: credentials
 });
@@ -45,25 +31,8 @@ const getQueueUrl = async () => {
 	return queueUrl;
 };
 
-const getwebsocketUrl = async () => {
-	const apiList = (await apigw.getRestApis({})).items;
-	const websocketApi = apiList?.find(api => api.name?.includes(wsApiName));
-
-	if (!websocketApi) {
-		console.error('Specified API does not exist');
-		return;
-	}
-	console.log('API with name [' + wsApiName + '] found');
-
-	return 'https://' + websocketApi.id + '.execute-api.' + region + '.amazonaws.com' + '/dev/sendnotification';
-};
-
 (async () => {
 	const queueUrl = await getQueueUrl();
-	websocketUrl = await getwebsocketUrl() || '';
-	if (!websocketUrl) {
-		console.error('Failed to fetch websocket API endpoint.');
-	}
 	const interceptor = aws4Interceptor(
 		{
 			region: region,
@@ -87,16 +56,16 @@ const getwebsocketUrl = async () => {
 						console.log(`Activating feeder [${feeder.id}] motor`);
 						res = await activateMotor(feeder);
 						// if (res) {
-						updateFeeder(body.id, undefined, true);
+						sendPostAction({id: body.id, action: 'activate'});
 						// }
 						break;
-					case 'update':
-						console.log(`Updating feeder [${feeder.id}]`);
-						updateFeeder(body.id, body.fields);
-						break;
+					// case 'update':
+					// 	console.log(`Updating feeder [${feeder.id}]`);
+					// 	updateFeeder(body.id, body.fields);
+					// 	break;
 					case 'skip':
 						console.log(`Resetting timer of feeder [${feeder.id}]`);
-						updateFeeder(body.id);
+						sendPostAction({id: body.id, action: 'skip'});
 						break;
 				}
 			} else {
@@ -142,34 +111,9 @@ async function wait(duration: number) {
 	return new Promise(resolve => setTimeout(resolve, duration));
 }
 
-async function sendWebsocketUpdate(update: HomeWSSendNotificationRequest): Promise<void> {
-	if (!websocketUrl) {
-		console.warn('websocket url is not defined. Skipping update.');
-		return;
-	}
-	try {
-		const res = await axios.post(websocketUrl, update);
-		console.log(res);
-	} catch (e) {
-		console.error('Error sending push notification for feeder update.', e);
-	}
-}
-
-function extractValuesFromDbResult<T>(res: Record<string, AttributeValue>): T {
-	const result: any = {};
-	Object.keys(res).forEach(key => {
-		const attributeValue = res[key];
-		if (attributeValue.N) {
-			result[key] = parseInt(attributeValue.N);
-		} else if (attributeValue.S) {
-			result[key] = attributeValue.S;
-		}
-	});
-	return result as T;
-}
-
-function createAttributeValue(value: string | number): AttributeValue {
-	return typeof value === 'string' ? { S: value } : { N: value.toString() };
+async function sendPostAction(req: FeederUpdateRequest): Promise<void> {
+	const res = await axios.post(feederApiUrl + '/postaction', req);
+	console.log(res);
 }
 
 type FeederConfig = {id: string, pin: number, feedTimer: number};
