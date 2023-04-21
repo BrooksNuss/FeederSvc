@@ -1,11 +1,12 @@
 export interface FeederInfo {
     id: string;
     name: string;
-    status: 'ONLINE' | 'OFFLINE';
+    enabled: boolean;
     lastActive: number;
     interval: string;
     estRemainingFood: number;
     estRemainingFeedings: number;
 	estFoodPerFeeding: number;
 	description: string;
+	skipNext: boolean;
 }

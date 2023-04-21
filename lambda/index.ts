@@ -1,21 +1,23 @@
 import { APIGatewayProxyHandler } from 'aws-lambda';
-import { fromIni } from '@aws-sdk/credential-providers';
+import { fromEnv } from '@aws-sdk/credential-providers';
 import { SQS, SendMessageCommandInput } from '@aws-sdk/client-sqs';
 import { DynamoDB } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocument, GetCommandInput, ScanCommandInput, UpdateCommandInput } from '@aws-sdk/lib-dynamodb';
-import { FeederApiResources, FeederSqsMessage, FeederUpdateRequest } from '../models/FeederSqsMessage';
+import { FeederApiResources, FeederSqsMessage, FeederUpdateRequest, UpdateFields, UserUpdatableFields } from '../models/FeederSqsMessage';
 import { HomeWSListenerSendNotificationRequest } from '../models/HomeWebsocketUpdateRequest';
 import { FeederInfo } from '../models/FeederInfo';
 import { DateTime } from 'luxon';
 import axios from 'axios';
 import { aws4Interceptor } from 'aws4-axios';
+import { EventBridgeClient, PutRuleCommand } from '@aws-sdk/client-eventbridge';
 
 const sqs = new SQS({});
 const dynamoClient = DynamoDBDocument.from(new DynamoDB({}));
 const feederQueueUrl = process.env.FEEDER_QUEUE_URL;
 const WSApiUrl = process.env.WS_LISTENER_URL;
 const region = 'us-east-1';
-const credentials = fromIni({profile: 'pi-sqs-consumer'});
+const credentials = fromEnv();
+export const eventBridgeClient = new EventBridgeClient({ region: region });
 
 export const handler: APIGatewayProxyHandler = async (event, context) => {
 	console.log('Received event:', JSON.stringify(event, null, 2));
@@ -38,22 +40,27 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 	
 	try {
 		const id = event.pathParameters?.id || '';
-		const requestBody = event.body ? JSON.parse(event.body) : null;
+		const requestBody = event.body ? JSON.parse(event.body) as UpdateFields : null;
 		const feeder = id ? await getFeeder(id) : null;
-
-		if (!feeder) {
-			throw `Could not find feeder with id [${id}]`;
-		}
 
 		switch (event.resource as FeederApiResources) {
 			case '/activate/{id}':
 				console.log('Received activate message for feeder {%s}', id);
-				if (feeder.status === 'OFFLINE') {
+				if (!feeder) {
+					throw `Could not find feeder with id [${id}]`;
+				}
+				if (!feeder.enabled) {
 					throw `Feeder [${id}] is offline`;
+				} else if (feeder.estRemainingFood <= 0) {
+					throw `Feeder [${id}] is out of food`;
+				} else if (feeder.skipNext) {
+					console.log('Feeder {%s} is skipping the current activation', id);
+					feeder.skipNext = !feeder.skipNext;
+					await handleUpdate({id: feeder.id, action: 'update', fields: {skipNext: feeder.skipNext}});
 				} else {
 					await postSqsMessage({id, type: 'activate'});
-					body = 'Success';
 				}
+				body = 'Success';
 				break;
 			case '/list-info':
 				console.log('Received get list message');
@@ -61,35 +68,65 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 				break;
 			case '/skip/{id}':
 				console.log('Received skip message for feeder {%s}', id);
-				if (feeder.status === 'OFFLINE') {
+				if (!feeder) {
+					throw `Could not find feeder with id [${id}]`;
+				}
+				if (!feeder.enabled) {
 					throw `Feeder [${id}] is offline`;
 				} else {
-					await postSqsMessage({id, type: 'skip'});
+					feeder.skipNext = !feeder.skipNext;
+					await handleUpdate({id: feeder.id, action: 'update', fields: {skipNext: feeder.skipNext}});
 					body = 'Success';
 				}
 				break;
 			case '/toggle-enabled/{id}':
 				console.log('Received toggle message for feeder {%s}', id);
-				await postSqsMessage({id, type: 'toggle-enabled'});
+				if (!feeder) {
+					throw `Could not find feeder with id [${id}]`;
+				}
+				feeder.enabled = !feeder.enabled;
+				await handleUpdate({id: feeder.id, action: 'update', fields: {enabled: feeder.enabled}});
 				body = 'Success';
 				break;
 			case '/update/{id}':
 				console.log('Received update message for feeder {%s}', id);
+				if (!feeder) {
+					throw `Could not find feeder with id [${id}]`;
+				}
 				if (!requestBody) {
 					console.error('Received update request with missing body');
 					throw 'Received update request with missing body';
 				}
 				validateInterval(requestBody);
-				handleUpdate(requestBody);
+				await handleUpdate({id: feeder.id, fields: requestBody, action: 'update'});
+				try {
+					if (requestBody?.interval) {
+						console.log('Updating EventBridge rule for feeder {%s}', feeder.id);
+						const command = new PutRuleCommand({
+							Name: feeder.id,
+							ScheduleExpression: 'cron(' + requestBody?.interval + ')',
+							State: 'ENABLED',
+						});
+						const res = await eventBridgeClient.send(command);
+						console.log('Updated EventBridge rule for feeder {%s}', feeder.id);
+						console.log(res);
+					}
+				} catch (e) {
+					console.error('Error updating EventBridge rules for feeder {%s}', feeder.id);
+					console.error(e);
+				}
 				body = 'Success';
 				break;
-			case '/postaction/{id}':
+			case '/post-activation/{id}':
 			// stuff goes here for handling db updates/websocket updates. called directly from the feeder.
+				if (!feeder) {
+					throw `Could not find feeder with id [${id}]`;
+				}
 				if (!requestBody) {
-					console.error('Received postaction request with missing body');
+					console.error('Received postactivation request with missing body');
 					throw 'Received update request with missing body';
 				}
-				handleUpdate(requestBody);
+				await handleUpdate({id: feeder.id, fields: requestBody, action: 'activate'});
 				break;
 		}
 	} catch (err: any) {
@@ -136,7 +173,8 @@ async function postSqsMessage(body: FeederSqsMessage) {
 }
 
 async function handleUpdate(request: FeederUpdateRequest): Promise<void> {
-	console.log('Fetching feeder by id: ' + request.id);
+	console.log('Starting update for feeder with id {%s}', request.id);
+	console.log(request);
 	// key type in docs is different from what the sdk expects. type should be GetItemInput
 	const feeder = await getFeeder(request.id);
 	// type of UpdateItemInput
@@ -153,18 +191,15 @@ async function handleUpdate(request: FeederUpdateRequest): Promise<void> {
 			updateFeederDetailAfterActivating(feeder);
 			updateParams = buildActivateCommand(feeder);
 			break;
-		case 'skip':
-			updateFeederDetailAfterActivating(feeder, true);
-			updateParams = buildActivateCommand(feeder, true);
-			break;
 	}
 	
 	try {
 		const res = await dynamoClient.update(updateParams);
 		if (res) {
 			console.log('Successfully updated db record for feeder {%s}', feeder.id);
+			console.log(res);
 			if (res.Attributes) {
-				sendWebsocketUpdate({action: 'sendNotification', subscriptionType: 'feederUpdate', value: res.Attributes as FeederInfo});
+				await sendWebsocketUpdate({action: 'sendNotification', subscriptionType: 'feederUpdate', value: res.Attributes as FeederInfo});
 			}
 		} else {
 			console.error('Error when writing db record for feeder {%s}', feeder.id);
@@ -181,6 +216,8 @@ async function sendWebsocketUpdate(request: HomeWSListenerSendNotificationReques
 		console.warn('websocket listener url is not defined. Skipping update.');
 		return;
 	}
+	console.log('Sending websocket message');
+	console.log(request);
 	try {
 		const res = await axios.post(WSApiUrl + '/sendnotification', request);
 		console.log(res);
@@ -216,37 +253,35 @@ function buildUpdateCommand(request: Required<FeederUpdateRequest>, feeder: Feed
 	};
 }
 
-function buildActivateCommand(feeder: FeederInfo, skip = false): UpdateCommandInput {
+function buildActivateCommand(feeder: FeederInfo): UpdateCommandInput {
 	const updateParams = {
 		TableName: 'feeders',
 		Key: {
 			id: feeder.id,
 		},
-		UpdateExpression: 'set ' + (!skip ? 'lastActive=:l, ' : '') + 'estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
+		UpdateExpression: 'set lastActive=:l, estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
 		ExpressionAttributeValues:{
 			':erfood': feeder.estRemainingFood.toString(),
-			':erfeedings': feeder.estRemainingFeedings.toString()
+			':erfeedings': feeder.estRemainingFeedings.toString(),
+			':l': feeder.lastActive
 		},
 		ReturnValues: 'ALL_NEW'
 	};
-	if (!skip) {
-		(updateParams.ExpressionAttributeValues as any)[':l'] = feeder.lastActive.toString();
-	}
 	return updateParams;
 }
 
-function updateFeederDetailAfterActivating(feeder: FeederInfo, skip = false): void {
+function updateFeederDetailAfterActivating(feeder: FeederInfo): void {
 	const now = DateTime.now();
 	feeder.lastActive = now.toMillis();
-	if (!skip) {
-		feeder.estRemainingFood = Math.max(feeder.estRemainingFood - feeder.estFoodPerFeeding, 0);
-		feeder.estRemainingFeedings = feeder.estRemainingFood / feeder.estFoodPerFeeding;
-	}
+	feeder.estRemainingFood = Math.max(feeder.estRemainingFood - feeder.estFoodPerFeeding, 0);
+	feeder.estRemainingFeedings = feeder.estRemainingFood / feeder.estFoodPerFeeding;
 }
 
-function validateInterval(request: FeederUpdateRequest): void {
-	const matches = request.fields?.interval?.match(/^(?:(?:[1-5]?[0-9],)*(?:[1-5]?[0-9])|\*)\s(?:(?:1?[0-9],|2[0-3],)*(?:1?[0-9]|2[0-3]))\s\*\s\*\s\?\s\*$/);
-	if (!matches) {
-		throw 'Invalid interval';
+function validateInterval(request: UpdateFields): void {
+	if (request.interval) {
+		const matches = request.interval.match(/^(?:(?:[1-5]?[0-9],)*(?:[1-5]?[0-9])|\*)\s(?:(?:1?[0-9],|2[0-3],)*(?:1?[0-9]|2[0-3])|\*)\s\*\s\*\s\?\s\*$/);
+		if (!matches) {
+			throw 'Invalid interval';
+		}
 	}
 }

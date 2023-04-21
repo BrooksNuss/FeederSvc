@@ -40,6 +40,7 @@
     "@aws-sdk/client-api-gateway": "^3.196.0",
     "@aws-sdk/client-apigatewayv2": "^3.194.0",
     "@aws-sdk/client-dynamodb": "^3.195.0",
+    "@aws-sdk/client-eventbridge": "^3.316.0",
     "@aws-sdk/client-sqs": "^3.194.0",
     "@aws-sdk/credential-providers": "^3.195.0",
     "@aws-sdk/lib-dynamodb": "^3.312.0",

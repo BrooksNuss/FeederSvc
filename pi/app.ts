@@ -1,6 +1,7 @@
 import { Consumer } from 'sqs-consumer-v3';
 import { fromIni } from '@aws-sdk/credential-providers';
 import { SQS } from '@aws-sdk/client-sqs';
+import { APIGateway } from '@aws-sdk/client-api-gateway';
 import { FeederSqsMessage, FeederUpdateRequest } from '../models/FeederSqsMessage';
 import * as FeederConfig from './feeders.json';
 import { Gpio } from 'pigpio';
@@ -11,12 +12,17 @@ console.log('Starting pi feeder server.');
 const credentials = fromIni({profile: 'pi-sqs-consumer'});
 const region = 'us-east-1';
 const queueName = 'FeederQueue';
-const feederApiUrl = process.env.FEEDER_API_URL;
+const feederApiName = 'feeder';
+let feederApiUrl = process.env.FEEDER_API_URL;
 
 const sqs = new SQS({
 	region: region,
 	credentials: credentials
 });
+const apigw = new APIGateway({
+	region: region,
+	credentials: credentials
+})
 
 const getQueueUrl = async () => {
 	const queueList = (await sqs.listQueues({})).QueueUrls;
@@ -31,8 +37,21 @@ const getQueueUrl = async () => {
 	return queueUrl;
 };
 
+const getFeederSvcUrl = async () => {
+	const apiList = (await apigw.getRestApis({})).items;
+	const feederApi = apiList?.find(api => api.name?.includes(feederApiName));
+
+	if (!feederApi) {
+		console.error('Specified API does not exist');
+		return;
+	}
+	feederApiUrl = 'https://' + feederApi.id + '.execute-api.' + region + '.amazonaws.com';
+	console.log('FeederSvc URL found: %s', feederApiUrl);
+};
+
 (async () => {
 	const queueUrl = await getQueueUrl();
+	await getFeederSvcUrl();
 	const interceptor = aws4Interceptor(
 		{
 			region: region,
@@ -51,23 +70,11 @@ const getQueueUrl = async () => {
 			const feeder: FeederConfig | undefined = FeederConfig.Feeders.find((feeder: any) => feeder.id === body.id);
 			let res;
 			if (feeder) {
-				switch(body.type) {
-					case 'activate':
-						console.log(`Activating feeder [${feeder.id}] motor`);
-						res = await activateMotor(feeder);
-						// if (res) {
-						sendPostAction({id: body.id, action: 'activate'});
-						// }
-						break;
-					// case 'update':
-					// 	console.log(`Updating feeder [${feeder.id}]`);
-					// 	updateFeeder(body.id, body.fields);
-					// 	break;
-					case 'skip':
-						console.log(`Resetting timer of feeder [${feeder.id}]`);
-						sendPostAction({id: body.id, action: 'skip'});
-						break;
-				}
+				console.log(`Activating feeder [${feeder.id}] motor`);
+				res = await activateMotor(feeder);
+				// if (res) {
+				sendPostActivation({id: body.id, action: 'activate'});
+				// }
 			} else {
 				throw `Could not find feeder with id {${body.id}}`;
 			}
@@ -111,9 +118,13 @@ async function wait(duration: number) {
 	return new Promise(resolve => setTimeout(resolve, duration));
 }
 
-async function sendPostAction(req: FeederUpdateRequest): Promise<void> {
-	const res = await axios.post(feederApiUrl + '/postaction', req);
-	console.log(res);
+async function sendPostActivation(req: FeederUpdateRequest): Promise<void> {
+	try {
+		const res = await axios.post(feederApiUrl + '/dev/post-activation/' + req.id, req);
+	} catch (e) {
+		console.error('Error sending post-activation request');
+		console.error(e);
+	}
 }
 
 type FeederConfig = {id: string, pin: number, feedTimer: number};
