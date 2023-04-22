@@ -9,4 +9,6 @@ export interface FeederInfo {
 	estFoodPerFeeding: number;
 	description: string;
 	skipNext: boolean;
+	pin: number;
+	duration: number;
 }

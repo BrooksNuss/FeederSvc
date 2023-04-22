@@ -3,10 +3,10 @@ import { fromIni } from '@aws-sdk/credential-providers';
 import { SQS } from '@aws-sdk/client-sqs';
 import { APIGateway } from '@aws-sdk/client-api-gateway';
 import { FeederSqsMessage, FeederUpdateRequest } from '../models/FeederSqsMessage';
-import * as FeederConfig from './feeders.json';
 import { Gpio } from 'pigpio';
 import { aws4Interceptor } from 'aws4-axios';
 import axios from 'axios';
+import { FeederInfo } from '../models/FeederInfo';
 
 console.log('Starting pi feeder server.');
 const credentials = fromIni({profile: 'pi-sqs-consumer'});
@@ -67,16 +67,16 @@ const getFeederSvcUrl = async () => {
 			//TODO: add some handlers here and there
 			console.log(message);
 			const body: FeederSqsMessage = message.Body ? JSON.parse(message.Body) : '';
-			const feeder: FeederConfig | undefined = FeederConfig.Feeders.find((feeder: any) => feeder.id === body.id);
+			const hwInfo: FeederInfo = body.feederInfo;
 			let res;
-			if (feeder) {
-				console.log(`Activating feeder [${feeder.id}] motor`);
-				res = await activateMotor(feeder);
+			if (hwInfo) {
+				console.log(`Activating feeder [${body.feederInfo.id}] motor`);
+				res = await activateMotor(hwInfo);
 				// if (res) {
-				sendPostActivation({id: body.id, action: 'activate'});
+				sendPostActivation({id: body.feederInfo.id, action: 'activate'});
 				// }
 			} else {
-				throw `Could not find feeder with id {${body.id}}`;
+				throw `Could not find feeder with id {${body.feederInfo.id}}`;
 			}
 		},
 		sqs
@@ -94,18 +94,18 @@ const getFeederSvcUrl = async () => {
 	console.log('Server started.');
 })();
 
-async function activateMotor(feeder: FeederConfig): Promise<boolean> {
+async function activateMotor(feeder: FeederInfo): Promise<boolean> {
 	try {
 		const motor = new Gpio(feeder.pin, {mode: Gpio.OUTPUT});
 		// rotate 2s, reverse 1s (helps prevent getting stuck), repeat
 		motor.servoWrite(2500);
-		await wait(feeder.feedTimer);
+		await wait(feeder.duration);
 		motor.servoWrite(500);
-		await wait(feeder.feedTimer);
+		await wait(feeder.duration);
 		motor.servoWrite(2500);
-		await wait(feeder.feedTimer);
+		await wait(feeder.duration);
 		motor.servoWrite(500);
-		await wait(feeder.feedTimer);
+		await wait(feeder.duration);
 		motor.servoWrite(0);
 	} catch (e) {
 		console.error(e);

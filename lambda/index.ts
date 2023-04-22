@@ -3,7 +3,7 @@ import { fromEnv } from '@aws-sdk/credential-providers';
 import { SQS, SendMessageCommandInput } from '@aws-sdk/client-sqs';
 import { DynamoDB } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocument, GetCommandInput, ScanCommandInput, UpdateCommandInput } from '@aws-sdk/lib-dynamodb';
-import { FeederApiResources, FeederSqsMessage, FeederUpdateRequest, UpdateFields, UserUpdatableFields } from '../models/FeederSqsMessage';
+import { FeederApiResources, FeederSqsMessage, FeederUpdateRequest, UpdateFields } from '../models/FeederSqsMessage';
 import { HomeWSListenerSendNotificationRequest } from '../models/HomeWebsocketUpdateRequest';
 import { FeederInfo } from '../models/FeederInfo';
 import { DateTime } from 'luxon';
@@ -46,20 +46,12 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 		switch (event.resource as FeederApiResources) {
 			case '/activate/{id}':
 				console.log('Received activate message for feeder {%s}', id);
-				if (!feeder) {
-					throw `Could not find feeder with id [${id}]`;
-				}
-				if (!feeder.enabled) {
-					throw `Feeder [${id}] is offline`;
-				} else if (feeder.estRemainingFood <= 0) {
-					throw `Feeder [${id}] is out of food`;
-				} else if (feeder.skipNext) {
-					console.log('Feeder {%s} is skipping the current activation', id);
-					feeder.skipNext = !feeder.skipNext;
-					await handleUpdate({id: feeder.id, action: 'update', fields: {skipNext: feeder.skipNext}});
-				} else {
-					await postSqsMessage({id, type: 'activate'});
-				}
+				activate(feeder, id);
+				body = 'Success';
+				break;
+			case '/service-activate/{id}':
+				console.log('Received service activate message for feeder {%s}', id);
+				activate(feeder, id);
 				body = 'Success';
 				break;
 			case '/list-info':
@@ -130,6 +122,7 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 				break;
 		}
 	} catch (err: any) {
+		console.error('Error when handling incoming request');
 		console.error(err);
 		statusCode = 400;
 		body = err.message;
@@ -143,6 +136,28 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 		headers,
 	};
 };
+
+async function activate(feeder: FeederInfo | null, id: string): Promise<void> {
+	try {
+		if (!feeder) {
+			throw `Could not find feeder with id [${id}]`;
+		}
+		if (!feeder.enabled) {
+			throw `Feeder [${id}] is offline`;
+		} else if (feeder.estRemainingFood <= 0) {
+			throw `Feeder [${id}] is out of food`;
+		} else if (feeder.skipNext) {
+			console.log('Feeder {%s} is skipping the current activation', id);
+			feeder.skipNext = !feeder.skipNext;
+			await handleUpdate({id: feeder.id, action: 'update', fields: {skipNext: feeder.skipNext}});
+		} else {
+			await postSqsMessage({type: 'activate', feederInfo: feeder});
+		}
+	} catch (err) {
+		console.error('Error during activation');
+		console.error(err);
+	}
+}
 
 async function getFeederList(): Promise<FeederInfo[]> {
 	console.log('Fetching feeder list from DynamoDB');
@@ -163,13 +178,21 @@ async function getFeeder(id: string): Promise<FeederInfo> {
 	return queryResult.Item as FeederInfo;
 }
 
-async function postSqsMessage(body: FeederSqsMessage) {
+async function postSqsMessage(body: FeederSqsMessage): Promise<void> {
 	console.log('Posting message to SQS');
+	console.log(body);
 	const params: SendMessageCommandInput = {
 		QueueUrl: feederQueueUrl || '',
 		MessageBody: JSON.stringify(body)
 	};
-	return sqs.sendMessage(params);
+	try {
+		const res = await sqs.sendMessage(params);
+		console.log('Completed SQS message send');
+		console.log(res);
+	} catch (err) {
+		console.error('error sending sqs message');
+		console.error(err);
+	}
 }
 
 async function handleUpdate(request: FeederUpdateRequest): Promise<void> {

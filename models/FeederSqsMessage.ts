@@ -1,10 +1,12 @@
+import { FeederInfo } from './FeederInfo';
+
 export interface FeederSqsMessage {
 	type: FeederSqsMessageType;
-	id: string;
+	feederInfo: FeederInfo;
 }
 
 export type FeederSqsMessageType = 'activate';
-export type FeederApiResources = '/activate/{id}' | '/list-info' | '/skip/{id}' | '/toggle-enabled/{id}' | '/update/{id}' | '/post-activation/{id}';
+export type FeederApiResources = '/activate/{id}' | '/list-info' | '/skip/{id}' | '/toggle-enabled/{id}' | '/update/{id}' | '/post-activation/{id}' | '/service-activate/{id}';
 export type FeederUpdateAction = 'update' | 'activate';
 
 export interface UpdateFields {
