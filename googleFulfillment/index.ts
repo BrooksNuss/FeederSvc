@@ -1,5 +1,5 @@
 // Import the appropriate service
-import { JsonObject, SmartHomeV1SyncDevices, SmartHomeV1SyncResponse, smarthome } from 'actions-on-google';
+import { JsonObject, SmartHomeV1ExecuteResponseCommands, SmartHomeV1SyncDevices, SmartHomeV1SyncResponse, smarthome } from 'actions-on-google';
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { APIGatewayProxyHandler } from 'aws-lambda/trigger/api-gateway-proxy';
 import { DynamoDB } from '@aws-sdk/client-dynamodb';
@@ -18,43 +18,59 @@ const app = smarthome({debug: true});
 
 app.onExecute(async (body, headers) => {
 	console.log('execute');
-	console.log(body);
 	const devices = body.inputs[0].payload.commands[0].devices;
 	const commands = body.inputs[0].payload.commands[0].execution;
 	const ids: string[] = [];
 	const requests: Array<Promise<any>> = [];
+	const formattedResults: SmartHomeV1ExecuteResponseCommands[] = [];
 	if (commands[0].command === 'action.devices.commands.Dispense') {
 		devices.forEach(async device => {
 			requests.push(activateFeeder(device.id));
 		});
 	} else if (commands[0].command === 'action.devices.commands.OnOff') {
-		devices.forEach(async device => {
-			requests.push(updateFeeder(device.id, { enabled: false }));
-		});
+		if (commands[0].params?.on === true) {
+			devices.forEach(async device => {
+				requests.push(updateFeeder(device.id, { enabled: true }));
+			});
+		} else if (commands[0].params?.on === false) {
+			devices.forEach(async device => {
+				requests.push(updateFeeder(device.id, { enabled: false }));
+			});
+		}
 	} else if (commands[0].command === 'action.devices.commands.StartStop') {
 		if (commands[0].params?.start === true) {
 			devices.forEach(async device => {
 				requests.push(activateFeeder(device.id));
 			});
+		} else {
+			devices.forEach(async device => {
+				formattedResults.push({ ids: [device.id], status: 'SUCCESS' });
+			});
 		}
 	}
+	console.log('awaiting promise');
 	const results = await Promise.allSettled<ActivateResponse>(requests);
-	const formattedResults = [];
 	results.forEach(res => {
 		if (res.status === 'fulfilled') {
 			//Add more error handling here. Include error reason
-			formattedResults.push({ id: res.value.id, status: res.value.status === 200 ? 'SUCCESS' : 'ERROR' });
+			formattedResults.push({ ids: [res.value.id], status: res.value.status === 200 ? 'SUCCESS' : 'ERROR' });
 		}
 	});
+	console.log('FINAL EXECUTE RESULTS:');
+	console.log(formattedResults);
 	return {
 		requestId: body.requestId,
 		payload: {
-			commands: [
-				{
-					ids,
-					status: 'SUCCESS'
-				}
-			]
+			commands: formattedResults.map(res => {
+				return { 
+					ids: res.ids,
+					status: res.status,
+					states: {
+						isRunning: false,
+						isPaused: false
+					}
+				};
+			})
 		},
 	};
 });
@@ -79,8 +95,8 @@ app.onQuery(async (body, headers) => {
 	if (items) {
 		(items.feeders as FeederInfo[]).forEach(feeder => {
 			devices[(feeder.id as string)] = {
-				online: feeder.enabled,
-				status: feeder.enabled ? 'SUCCESS' : 'OFFLINE',
+				online: true,
+				status: 'SUCCESS',
 				dispenseItems: [
 					{
 						itemName: 'cat_food_key',
@@ -96,7 +112,8 @@ app.onQuery(async (body, headers) => {
 					}
 				],
 				isRunning: false,
-				isPaused: false
+				isPaused: false,
+				on: feeder.enabled
 			};
 		});
 	}
@@ -280,7 +297,7 @@ async function activateFeeder(id: string): Promise<ActivateResponse> {
 	);
 	axios.interceptors.request.use(interceptor);
 
-	const res = await axios.post(feederApiUrl + '/service-activate/' + id, { source: 'google' });
+	const res = await axios.post(feederApiUrl + '/service-activate/' + id, {}, { headers: { 'activate-source': 'google' } });
 	console.log('sent activate request');
 	console.log(res);
 	return { id, status: res.status };
@@ -297,8 +314,7 @@ async function updateFeeder(id: string, fields: UpdateFields): Promise<ActivateR
 	);
 	axios.interceptors.request.use(interceptor);
 
-	fields.source = 'google';
-	const res = await axios.post(feederApiUrl + '/service-update/' + id, fields);
+	const res = await axios.post(feederApiUrl + '/service-update/' + id, fields, { headers: { 'update-source': 'google' } });
 	console.log('sent activate request');
 	console.log(res);
 	return { id, status: res.status };
