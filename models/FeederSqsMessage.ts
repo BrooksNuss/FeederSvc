@@ -6,7 +6,7 @@ export interface FeederSqsMessage {
 }
 
 export type FeederSqsMessageType = 'activate';
-export type FeederApiResources = '/activate/{id}' | '/list-info' | '/skip/{id}' | '/toggle-enabled/{id}' | '/update/{id}' | '/post-activation/{id}' | '/service-activate/{id}';
+export type FeederApiResources = '/activate/{id}' | '/list-info' | '/skip/{id}' | '/toggle-enabled/{id}' | '/update/{id}' | '/post-activation/{id}' | '/service-activate/{id}' | '/service-update/{id}';
 export type FeederUpdateAction = 'update' | 'activate';
 
 export interface UpdateFields {
@@ -18,12 +18,13 @@ export interface UpdateFields {
 	description?: string;
 	estRemainingFeedings?: number;
 	skipNext?: boolean;
+	source?: string;
 }
 
 export interface FeederUpdateRequest {
-	id: string,
-	action: FeederUpdateAction,
-	fields?: UpdateFields
+	id: string;
+	action: FeederUpdateAction;
+	fields?: UpdateFields;
 }
 
 export interface UserUpdatableFields {

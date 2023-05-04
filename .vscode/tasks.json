@@ -9,6 +9,14 @@
             "label": "npm: build-lambda",
             "detail": "tsc --project lambda/tsconfig.json"
         },
+		{
+			"type": "npm",
+			"script": "build-google",
+			"group": "build",
+			"problemMatcher": [],
+			"label": "npm: build-google",
+			"detail": "tsc --project google/tsconfig.json"
+		},
         {
             "type": "npm",
             "script": "build-pi",

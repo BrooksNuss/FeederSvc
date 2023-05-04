@@ -41,6 +41,8 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 	try {
 		const id = event.pathParameters?.id || '';
 		const requestBody = event.body ? JSON.parse(event.body) as UpdateFields : null;
+		console.log('Request body:');
+		console.log(event.body);
 		const feeder = id ? await getFeeder(id) : null;
 
 		switch (event.resource as FeederApiResources) {
@@ -81,6 +83,7 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 				body = 'Success';
 				break;
 			case '/update/{id}':
+			case '/service-update/{id}':
 				console.log('Received update message for feeder {%s}', id);
 				if (!feeder) {
 					throw `Could not find feeder with id [${id}]`;
@@ -284,8 +287,8 @@ function buildActivateCommand(feeder: FeederInfo): UpdateCommandInput {
 		},
 		UpdateExpression: 'set lastActive=:l, estRemainingFood=:erfood, estRemainingFeedings=:erfeedings',
 		ExpressionAttributeValues:{
-			':erfood': feeder.estRemainingFood.toString(),
-			':erfeedings': feeder.estRemainingFeedings.toString(),
+			':erfood': feeder.estRemainingFood,
+			':erfeedings': feeder.estRemainingFeedings,
 			':l': feeder.lastActive
 		},
 		ReturnValues: 'ALL_NEW'

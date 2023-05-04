@@ -9,6 +9,7 @@
     "prestart": "npm run build",
     "start": "node ./dist/pi/app",
     "build-lambda": "tsc --project lambda/tsconfig.json",
+    "build-google": "tsc --project googleFulfillment/tsconfig.json",
     "build-pi": "tsc --project pi/tsconfig.json",
     "start-pi": "node ./dist/pi/app"
   },
@@ -44,6 +45,7 @@
     "@aws-sdk/client-sqs": "^3.194.0",
     "@aws-sdk/credential-providers": "^3.195.0",
     "@aws-sdk/lib-dynamodb": "^3.312.0",
+    "actions-on-google": "^3.0.0",
     "aws4-axios": "^2.4.9",
     "axios": "^0.25.0",
     "luxon": "^2.4.0",

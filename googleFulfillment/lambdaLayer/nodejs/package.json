@@ -1,0 +1,16 @@
+{
+  "name": "feedersvcgooglefulfillmentlambdalayer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "actions-on-google": "^3.0.0",
+	"aws4-axios": "^2.4.9",
+    "axios": "^0.25.0"
+  }
+}

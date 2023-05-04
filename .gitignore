@@ -1,4 +1,4 @@
 /node_modules
 /dist
-/lambda/lambdaLayer/nodejs/node_modules
+/**/lambdaLayer/nodejs/node_modules
 *.zip
