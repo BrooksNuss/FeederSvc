@@ -97,15 +97,21 @@ const getFeederSvcUrl = async () => {
 async function activateMotor(feeder: FeederInfo): Promise<boolean> {
 	try {
 		const motor = new Gpio(feeder.pin, {mode: Gpio.OUTPUT});
-		// rotate 2s, reverse 1s (helps prevent getting stuck), repeat
+		// rotate 2s, wait .5s, reverse 1s, wait .5s x2 (helps prevent getting stuck), repeat
 		motor.servoWrite(2500);
 		await wait(feeder.duration);
+		motor.servoWrite(0);
+		await wait(500);
 		motor.servoWrite(500);
-		await wait(feeder.duration);
+		await wait(feeder.duration / 2);
+		motor.servoWrite(0);
+		await wait(500);
 		motor.servoWrite(2500);
 		await wait(feeder.duration);
+		motor.servoWrite(0);
+		await wait(500);
 		motor.servoWrite(500);
-		await wait(feeder.duration);
+		await wait(feeder.duration / 2);
 		motor.servoWrite(0);
 	} catch (e) {
 		console.error(e);

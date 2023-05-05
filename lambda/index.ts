@@ -48,12 +48,12 @@ export const handler: APIGatewayProxyHandler = async (event, context) => {
 		switch (event.resource as FeederApiResources) {
 			case '/activate/{id}':
 				console.log('Received activate message for feeder {%s}', id);
-				activate(feeder, id);
+				await activate(feeder, id);
 				body = 'Success';
 				break;
 			case '/service-activate/{id}':
 				console.log('Received service activate message for feeder {%s}', id);
-				activate(feeder, id);
+				await activate(feeder, id);
 				body = 'Success';
 				break;
 			case '/list-info':
@@ -160,6 +160,7 @@ async function activate(feeder: FeederInfo | null, id: string): Promise<void> {
 		console.error('Error during activation');
 		console.error(err);
 	}
+	console.log('activation complete');
 }
 
 async function getFeederList(): Promise<FeederInfo[]> {
